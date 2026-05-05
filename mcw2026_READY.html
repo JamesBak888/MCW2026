@@ -300,6 +300,15 @@ textarea{resize:vertical;min-height:60px}
       </div>
     </div>
     <div class="admin-section">
+      <div class="admin-title">GitHub Sync</div>
+      <div class="admin-sub">Optional: enter a GitHub Personal Access Token (fine-grained, <b>Contents: Read &amp; Write</b> on the MCW2026 repo). Enables direct browser → GitHub sync so all judges always see live scores from any device. Leave blank to rely on Google Sheets only.</div>
+      <div class="add-form">
+        <div class="form-row full"><div class="form-field"><label>GitHub Personal Access Token</label><input type="password" id="gh-token" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" onfocus="if(ghToken&&!this.value)this.placeholder='Token saved – paste new to replace'"></div></div>
+        <div id="gh-token-status" style="font-size:12px;color:var(--text-muted);margin-top:6px;padding:0 2px"></div>
+        <button class="save-btn" onclick="saveGhToken()">&#10003; Save Token</button>
+      </div>
+    </div>
+    <div class="admin-section">
       <div class="admin-title">Contestants</div>
       <div class="admin-sub">Add all contestant profiles</div>
       <div class="admin-list contestants-list" id="contestants-list"></div>
@@ -357,6 +366,8 @@ textarea{resize:vertical;min-height:60px}
 
 <script>
 const WEBAPP='https://script.google.com/macros/s/AKfycbwWc0u73dhIi2qATmia5Xsbte7GwXooJKHAmz0DIEHrjv6MQljGouMTrWme_P2VKdtufQ/exec';
+const GITHUB_RAW='https://raw.githubusercontent.com/jamesbak888/MCW2026/main/scores.json';
+const GITHUB_API='https://api.github.com/repos/jamesbak888/MCW2026/contents/scores.json';
 const ADMIN_PASS='mcw2026';
 const ROUNDS={
   intro:{label:'Introduction Round',cats:['Introduction','Beauty','Make Up','Personality','Q&A','Smiles','Catwalk','Overall'],max:80},
@@ -373,6 +384,7 @@ let curJudge='',curRound='',curIdx=0,curTab='combined',curFilter='all';
 let pendingScreen='';
 let sheetData=[];
 let liveTimer=null;
+let ghToken='';
 
 function loadLS(){
   try{
@@ -381,11 +393,12 @@ function loadLS(){
     if(d.contestants&&d.contestants.length)contestants=d.contestants;
     if(d.scores)scores=d.scores;
     if(d.scored)scored=d.scored;
+    if(d.ghToken)ghToken=d.ghToken;
   }catch(e){}
 }
 function saveLS(){
   try{
-    localStorage.setItem(LS,JSON.stringify({judges,contestants,scores,scored}));
+    localStorage.setItem(LS,JSON.stringify({judges,contestants,scores,scored,ghToken}));
     return true;
   }catch(e){
     alert('Cannot save on this device. If you added many photos, reduce photo count/size or clear old browser data, then try again.');
@@ -645,14 +658,30 @@ async function saveNext(){
   window[cbName]=function(r){clearTimeout(tm);delete window[cbName];if(sc.parentNode)sc.parentNode.removeChild(sc);document.getElementById('sync-bar').classList.remove('show');showToast('Saved and sent to Google Sheets ✓');};
   sc.src=WEBAPP+'?'+pm.toString();
   document.head.appendChild(sc);
+  if(ghToken)pushToGitHub();
   if(curIdx<contestants.length-1){curIdx++;buildChips();renderScoring();}
   else{showToast('All contestants scored!');setTimeout(backToRounds,1500);}
 }
 function prevC(){if(curIdx>0){curIdx--;buildChips();renderScoring();}}
 
-function loadSheetData(){
-  document.getElementById('res-meta').textContent='Fetching from Google Sheets...';
+async function loadSheetData(){
+  document.getElementById('res-meta').textContent='Fetching latest scores...';
   if(!sheetData.length)document.getElementById('res-list').innerHTML='<div class="no-scores">Loading...</div>';
+  // Try GitHub first — public, fast, no JSONP restriction
+  try{
+    const ghRes=await fetch(GITHUB_RAW+'?t='+Date.now(),{cache:'no-store'});
+    if(ghRes.ok){
+      const json=await ghRes.json();
+      const remoteRows=normalizeGoogleRows(json);
+      if(remoteRows.length){
+        sheetData=mergeRows(remoteRows,buildLocalSheetData());
+        renderResults('GitHub live ✓');
+        return;
+      }
+    }
+  }catch(e){}
+  // Fall back to Google Sheets JSONP
+  document.getElementById('res-meta').textContent='Fetching from Google Sheets...';
   const cbName='_ld'+Date.now();
   const sc=document.createElement('script');
   const tm=setTimeout(()=>{delete window[cbName];if(sc.parentNode)sc.parentNode.removeChild(sc);sheetData=sheetData.length?sheetData:buildLocalSheetData();renderResults(sheetData.length?'Local saved scores – Google Sheets not reachable':'Google Sheets not reachable');},8000);
@@ -846,6 +875,39 @@ function editC(i){
   showToast('Edit details then tap Add Contestant');
 }
 function saveAdmin(){updateJudgeSelect();saveLS();showToast('Saved!');goScreen('s-login');}
+
+async function pushToGitHub(){
+  try{
+    const allData=buildLocalSheetData();
+    const jsonStr=JSON.stringify({status:'ok',data:allData});
+    const bytes=new TextEncoder().encode(jsonStr);
+    let binary='';
+    bytes.forEach(b=>binary+=String.fromCharCode(b));
+    const content=btoa(binary);
+    let sha='';
+    try{
+      const r=await fetch(GITHUB_API,{headers:{Authorization:'token '+ghToken,'User-Agent':'MCW2026',Accept:'application/vnd.github.v3+json'}});
+      if(r.ok){const j=await r.json();sha=j.sha||'';}
+    }catch(e){}
+    const body={message:'Score update '+new Date().toISOString(),content};
+    if(sha)body.sha=sha;
+    const res=await fetch(GITHUB_API,{
+      method:'PUT',
+      headers:{Authorization:'token '+ghToken,'Content-Type':'application/json','User-Agent':'MCW2026',Accept:'application/vnd.github.v3+json'},
+      body:JSON.stringify(body)
+    });
+    if(res.ok)showToast('Saved to Google Sheets + GitHub ✓');
+  }catch(e){}
+}
+
+function saveGhToken(){
+  ghToken=document.getElementById('gh-token').value.trim();
+  document.getElementById('gh-token').value='';
+  saveLS();
+  const status=document.getElementById('gh-token-status');
+  if(status)status.textContent=ghToken?'✓ Token saved — judges on any device will sync via GitHub':'Token cleared.';
+  showToast(ghToken?'GitHub token saved ✓':'GitHub token cleared');
+}
 </script>
 </body>
 </html>
