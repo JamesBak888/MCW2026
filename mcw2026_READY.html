@@ -368,6 +368,8 @@ textarea{resize:vertical;min-height:60px}
 const WEBAPP='https://script.google.com/macros/s/AKfycbwWc0u73dhIi2qATmia5Xsbte7GwXooJKHAmz0DIEHrjv6MQljGouMTrWme_P2VKdtufQ/exec';
 const GITHUB_RAW='https://raw.githubusercontent.com/jamesbak888/MCW2026/main/scores.json';
 const GITHUB_API='https://api.github.com/repos/jamesbak888/MCW2026/contents/scores.json';
+const GITHUB_CFG_RAW='https://raw.githubusercontent.com/jamesbak888/MCW2026/main/config.json';
+const GITHUB_CFG_API='https://api.github.com/repos/jamesbak888/MCW2026/contents/config.json';
 const ADMIN_PASS='mcw2026';
 const ROUNDS={
   intro:{label:'Introduction Round',cats:['Introduction','Beauty','Make Up','Personality','Q&A','Smiles','Catwalk','Overall'],max:80},
@@ -409,6 +411,7 @@ loadLS();
 renderJudgesList();
 renderContestantsList();
 updateJudgeSelect();
+loadConfigFromGitHub();
 
 function showToast(msg){
   const t=document.getElementById('toast');
@@ -874,7 +877,7 @@ function editC(i){
   document.getElementById('new-c-name').focus();
   showToast('Edit details then tap Add Contestant');
 }
-function saveAdmin(){updateJudgeSelect();saveLS();showToast('Saved!');goScreen('s-login');}
+function saveAdmin(){updateJudgeSelect();saveLS();if(ghToken)pushConfigToGitHub();showToast('Saved!');goScreen('s-login');}
 
 async function pushToGitHub(){
   try{
@@ -907,6 +910,43 @@ function saveGhToken(){
   const status=document.getElementById('gh-token-status');
   if(status)status.textContent=ghToken?'✓ Token saved — judges on any device will sync via GitHub':'Token cleared.';
   showToast(ghToken?'GitHub token saved ✓':'GitHub token cleared');
+}
+
+async function loadConfigFromGitHub(){
+  try{
+    const res=await fetch(GITHUB_CFG_RAW+'?t='+Date.now(),{cache:'no-store'});
+    if(!res.ok)return;
+    const cfg=await res.json();
+    let changed=false;
+    if(cfg.judges&&cfg.judges.length){judges=cfg.judges;changed=true;}
+    if(cfg.contestants&&cfg.contestants.length){contestants=cfg.contestants;changed=true;}
+    if(changed){saveLS();renderJudgesList();renderContestantsList();updateJudgeSelect();}
+  }catch(e){}
+}
+
+async function pushConfigToGitHub(){
+  if(!ghToken)return;
+  try{
+    const cfg={judges,contestants,updatedAt:new Date().toISOString()};
+    const jsonStr=JSON.stringify(cfg);
+    const bytes=new TextEncoder().encode(jsonStr);
+    let binary='';
+    bytes.forEach(b=>binary+=String.fromCharCode(b));
+    const content=btoa(binary);
+    let sha='';
+    try{
+      const r=await fetch(GITHUB_CFG_API,{headers:{Authorization:'token '+ghToken,'User-Agent':'MCW2026',Accept:'application/vnd.github.v3+json'}});
+      if(r.ok){const j=await r.json();sha=j.sha||'';}
+    }catch(e){}
+    const body={message:'Config update '+new Date().toISOString(),content};
+    if(sha)body.sha=sha;
+    await fetch(GITHUB_CFG_API,{
+      method:'PUT',
+      headers:{Authorization:'token '+ghToken,'Content-Type':'application/json','User-Agent':'MCW2026',Accept:'application/vnd.github.v3+json'},
+      body:JSON.stringify(body)
+    });
+    showToast('Judges & contestants synced to GitHub ✓');
+  }catch(e){showToast('Saved locally – GitHub sync failed');}
 }
 </script>
 </body>
