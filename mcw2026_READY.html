@@ -758,10 +758,12 @@ function addJudge(){
   if(judges.length>=11){alert('Maximum 11 judges.');return;}
   judges.push(v);document.getElementById('new-j').value='';
   renderJudgesList();updateJudgeSelect();saveLS();showToast('Judge added');
+  if(ghToken)pushConfigToGitHub();
 }
 function delJudge(i){
   if(!confirm('Remove "'+judges[i]+'"?'))return;
   judges.splice(i,1);renderJudgesList();updateJudgeSelect();saveLS();
+  if(ghToken)pushConfigToGitHub();
 }
 
 function renderContestantsList(){
@@ -855,8 +857,9 @@ function addContestant(){
   contestants.push({name,age:document.getElementById('new-c-age').value,height:document.getElementById('new-c-height').value,weight:document.getElementById('new-c-weight').value,vital:document.getElementById('new-c-vital').value,prof:document.getElementById('new-c-prof').value,hobby:document.getElementById('new-c-hobby').value,photos:pendingPhotos.slice(0,3)});
   clearContestantForm();
   renderContestantsList();saveLS();showToast('Contestant added');
+  if(ghToken)pushConfigToGitHub();
 }
-function delC(i){if(!confirm('Remove "'+contestants[i].name+'"?'))return;contestants.splice(i,1);renderContestantsList();saveLS();}
+function delC(i){if(!confirm('Remove "'+contestants[i].name+'"?'))return;contestants.splice(i,1);renderContestantsList();saveLS();if(ghToken)pushConfigToGitHub();}
 function promptMoveC(i){
   const target=prompt('Move contestant to position number:', i+1);
   if(target===null)return;
@@ -909,8 +912,9 @@ function saveGhToken(){
   document.getElementById('gh-token').value='';
   saveLS();
   const status=document.getElementById('gh-token-status');
-  if(status)status.textContent=ghToken?'✓ Token saved — judges on any device will sync via GitHub':'Token cleared.';
+  if(status)status.textContent=ghToken?'✓ Token saved — all changes now auto-sync to GitHub instantly':'Token cleared.';
   showToast(ghToken?'GitHub token saved ✓':'GitHub token cleared');
+  if(ghToken)pushConfigToGitHub();
 }
 
 async function loadConfigFromGitHub(){
