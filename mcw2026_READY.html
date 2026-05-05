@@ -794,7 +794,7 @@ function handlePhotoPick(files){
   const picked=Array.from(files||[]).slice(0,3);
   if(!picked.length)return;
   Promise.all(picked.map(fileToPhoto)).then(imgs=>{
-    pendingPhotos=imgs.filter(Boolean).slice(0,3);
+    pendingPhotos=[...pendingPhotos,...imgs.filter(Boolean)].slice(0,3);
     renderPhotoPreview();
     document.getElementById('new-c-photos').value='';
   });
