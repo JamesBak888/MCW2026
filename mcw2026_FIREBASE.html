@@ -416,9 +416,10 @@ function loadLS(){
   }catch(e){}
 }
 async function saveLS(){
-  // Save scores to Firestore (no photos — solves the storage limit error)
+  // Save scores + contestant metadata + judges to Firestore (photos stay on GitHub)
   try{
-    await FB_DOC.set({scores,scored,ghToken,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    const contestantsMeta=contestants.map(c=>({name:c.name||'',age:c.age||'',height:c.height||'',weight:c.weight||'',vital:c.vital||'',prof:c.prof||'',hobby:c.hobby||''}));
+    await FB_DOC.set({scores,scored,ghToken,judges,contestants:contestantsMeta,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
   }catch(e){console.error('Firestore save error:',e);}
   // Also cache locally (silently ignore if storage is full)
   try{localStorage.setItem(LS,JSON.stringify({judges,contestants,scores,scored,ghToken}));}catch(e){}
@@ -432,6 +433,15 @@ async function syncFromFirestore(){
       if(d.scores)scores=d.scores;
       if(d.scored)scored=d.scored;
       if(d.ghToken)ghToken=d.ghToken;
+      if(d.judges&&d.judges.length)judges=d.judges;
+      if(d.contestants&&d.contestants.length){
+        // Merge: use Firestore contestant list, restore photos from GitHub data
+        contestants=d.contestants.map(fc=>{
+          const ghC=contestants.find(c=>c.name===fc.name);
+          return ghC?{...fc,photos:ghC.photos||[]}:{...fc,photos:[]};
+        });
+      }
+      renderJudgesList();renderContestantsList();updateJudgeSelect();
       buildChips&&buildChips();
     }
   }catch(e){console.error('Firestore load error:',e);}
@@ -440,8 +450,8 @@ loadLS();
 renderJudgesList();
 renderContestantsList();
 updateJudgeSelect();
-loadConfigFromGitHub();
-syncFromFirestore();
+// Load GitHub config first (photos), then sync Firestore on top (latest contestant/score data)
+loadConfigFromGitHub().then(()=>syncFromFirestore()).catch(()=>syncFromFirestore());
 
 function showToast(msg){
   const t=document.getElementById('toast');
