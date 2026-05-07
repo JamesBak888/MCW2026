@@ -460,12 +460,20 @@ async function syncFromFirestore(){
       if(d.ghToken)ghToken=d.ghToken;
       if(d.judges&&d.judges.length)judges=d.judges;
       if(d.contestants&&d.contestants.length){
-        // Merge: Firestore has contestant list, GitHub has photos for existing ones
-        contestants=d.contestants.map(fc=>{
-          const ghC=contestants.find(c=>c.name===fc.name);
+        const memContestants=contestants.slice(); // snapshot of current in-memory list (GitHub + localStorage)
+        const fsNames=new Set(d.contestants.map(c=>c.name));
+
+        // Build merged list: Firestore contestants with photos from GitHub where available
+        const fromFS=d.contestants.map(fc=>{
+          const ghC=memContestants.find(c=>c.name===fc.name);
           return ghC?{...fc,photos:ghC.photos||[]}:{...fc,photos:[]};
         });
-        // Fetch photos from Firestore for any contestant missing photos
+
+        // Add any contestants in memory but missing from Firestore (not yet saved)
+        const onlyInMem=memContestants.filter(c=>!fsNames.has(c.name));
+        contestants=[...fromFS,...onlyInMem];
+
+        // Fetch photos from Firestore for contestants still missing photos
         const needPhotos=contestants.filter(c=>!c.photos||!c.photos.length);
         if(needPhotos.length){
           await Promise.all(needPhotos.map(async c=>{
@@ -478,6 +486,9 @@ async function syncFromFirestore(){
             }catch(e){}
           }));
         }
+
+        // If we found more contestants than Firestore had, auto-save the full list
+        if(contestants.length>d.contestants.length)saveLS();
       }
       renderJudgesList();renderContestantsList();updateJudgeSelect();
       buildChips&&buildChips();
