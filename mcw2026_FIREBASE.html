@@ -393,6 +393,25 @@ const FIREBASE_CONFIG={
 firebase.initializeApp(FIREBASE_CONFIG);
 const db=firebase.firestore();
 const FB_DOC=db.collection('mcw2026').doc('state');
+const PHOTOS_COL=db.collection('mcw2026_photos');
+
+// Compress photo to keep under Firestore 1MB limit
+function compressPhoto(dataUrl){
+  return new Promise(resolve=>{
+    if(!dataUrl||!dataUrl.startsWith('data:image')){resolve(dataUrl);return;}
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=600;
+      const s=Math.min(1,MAX/Math.max(img.width,img.height));
+      const c=document.createElement('canvas');
+      c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      resolve(c.toDataURL('image/jpeg',0.65));
+    };
+    img.onerror=()=>resolve(dataUrl);
+    img.src=dataUrl;
+  });
+}
 
 let judges=[];
 let contestants=[];
@@ -416,12 +435,18 @@ function loadLS(){
   }catch(e){}
 }
 async function saveLS(){
-  // Save scores + contestant metadata + judges to Firestore (photos stay on GitHub)
   try{
     const contestantsMeta=contestants.map(c=>({name:c.name||'',age:c.age||'',height:c.height||'',weight:c.weight||'',vital:c.vital||'',prof:c.prof||'',hobby:c.hobby||''}));
     await FB_DOC.set({scores,scored,ghToken,judges,contestants:contestantsMeta,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    // Save photos per contestant in separate Firestore docs (avoids 1MB limit)
+    const photoSaves=contestants.filter(c=>c.photos&&c.photos.length>0).map(async c=>{
+      try{
+        const compressed=await Promise.all(c.photos.map(p=>compressPhoto(p)));
+        await PHOTOS_COL.doc(c.name.replace(/\W+/g,'_').substring(0,100)).set({name:c.name,photos:compressed});
+      }catch(e){}
+    });
+    await Promise.all(photoSaves);
   }catch(e){console.error('Firestore save error:',e);}
-  // Also cache locally (silently ignore if storage is full)
   try{localStorage.setItem(LS,JSON.stringify({judges,contestants,scores,scored,ghToken}));}catch(e){}
   return true;
 }
@@ -435,11 +460,24 @@ async function syncFromFirestore(){
       if(d.ghToken)ghToken=d.ghToken;
       if(d.judges&&d.judges.length)judges=d.judges;
       if(d.contestants&&d.contestants.length){
-        // Merge: use Firestore contestant list, restore photos from GitHub data
+        // Merge: Firestore has contestant list, GitHub has photos for existing ones
         contestants=d.contestants.map(fc=>{
           const ghC=contestants.find(c=>c.name===fc.name);
           return ghC?{...fc,photos:ghC.photos||[]}:{...fc,photos:[]};
         });
+        // Fetch photos from Firestore for any contestant missing photos
+        const needPhotos=contestants.filter(c=>!c.photos||!c.photos.length);
+        if(needPhotos.length){
+          await Promise.all(needPhotos.map(async c=>{
+            try{
+              const pd=await PHOTOS_COL.doc(c.name.replace(/\W+/g,'_').substring(0,100)).get();
+              if(pd.exists){
+                const idx=contestants.findIndex(x=>x.name===c.name);
+                if(idx>=0)contestants[idx].photos=pd.data().photos||[];
+              }
+            }catch(e){}
+          }));
+        }
       }
       renderJudgesList();renderContestantsList();updateJudgeSelect();
       buildChips&&buildChips();
