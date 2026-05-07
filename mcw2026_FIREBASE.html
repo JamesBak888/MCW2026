@@ -964,7 +964,7 @@ async function loadConfigFromGitHub(){
     let changed=false;
     if(cfg.judges&&cfg.judges.length){judges=cfg.judges;changed=true;}
     if(cfg.contestants&&cfg.contestants.length){contestants=cfg.contestants;changed=true;}
-    if(changed){saveLS();renderJudgesList();renderContestantsList();updateJudgeSelect();}
+    if(changed){renderJudgesList();renderContestantsList();updateJudgeSelect();}
   }catch(e){}
 }
 
