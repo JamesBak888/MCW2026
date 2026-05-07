@@ -171,6 +171,7 @@ textarea{resize:vertical;min-height:60px}
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
 </head>
 <body>
 
@@ -393,6 +394,7 @@ const FIREBASE_CONFIG={
 firebase.initializeApp(FIREBASE_CONFIG);
 const db=firebase.firestore();
 const FB_DOC=db.collection('mcw2026').doc('state');
+const storage=firebase.storage();
 const PHOTOS_COL=db.collection('mcw2026_photos');
 
 // Compress photo to keep under Firestore 1MB limit
@@ -441,7 +443,7 @@ async function saveLS(){
     // Save photos per contestant in separate Firestore docs (avoids 1MB limit)
     const photoSaves=contestants.filter(c=>c.photos&&c.photos.length>0).map(async c=>{
       try{
-        const compressed=await Promise.all(c.photos.map(p=>compressPhoto(p)));
+        const compressed=await Promise.all(c.photos.map(p=>p&&p.startsWith('http')?Promise.resolve(p):compressPhoto(p)));
         await PHOTOS_COL.doc(c.name.replace(/\W+/g,'_').substring(0,100)).set({name:c.name,photos:compressed});
       }catch(e){}
     });
@@ -899,7 +901,22 @@ function fileToPhoto(file){
         else if(h>=w&&h>max){w=Math.round(w*max/h);h=max;}
         const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
         canvas.getContext('2d').drawImage(img,0,0,w,h);
-        resolve(canvas.toDataURL('image/jpeg',0.75));
+        // Upload to Firebase Storage — no localStorage, no size limit
+        canvas.toBlob(async blob=>{
+          if(!blob){resolve('');return;}
+          try{
+            showToast('Uploading photo...');
+            const ref=storage.ref('photos/'+Date.now()+'_'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_'));
+            const snap=await ref.put(blob,{contentType:'image/jpeg'});
+            const url=await snap.ref.getDownloadURL();
+            showToast('Photo uploaded ✓');
+            resolve(url);
+          }catch(err){
+            console.error('Storage upload failed:',err);
+            showToast('Upload failed — check Storage is enabled');
+            resolve('');
+          }
+        },'image/jpeg',0.75);
       };
       img.onerror=()=>resolve('');
       img.src=e.target.result;
